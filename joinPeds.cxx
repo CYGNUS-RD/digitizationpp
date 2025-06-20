@@ -1,3 +1,12 @@
+/*
+ * Copyright (C) 2024 CYGNO Collaboration
+ *
+ *
+ * Author: Stefano Piacentini
+ * Created in 2024
+ *
+ */
+
 #include <iostream>
 #include <unistd.h>
 #include <limits.h>
@@ -38,7 +47,11 @@ int main(int argc, char** argv)
     string parte= "";
     for(unsigned int i=0;i<path_to_config.size()-2;i++) parte=parte+path_to_config[i]+ "/";
     char buffer[PATH_MAX];
-    getcwd(buffer,sizeof(buffer));
+    char* ret = getcwd(buffer,sizeof(buffer));
+    if(!ret) {
+        cerr << "Failed to get current directory... exiting" << endl;
+        return EXIT_FAILURE;
+    }
     string currentPath(buffer);
     const string SOURCE_DIR= currentPath+"/"+parte;
     

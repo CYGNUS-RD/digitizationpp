@@ -83,6 +83,22 @@ namespace s3 {
                 curl_handle = curl_easy_init();
                 // set URL to get here
                 curl_easy_setopt(curl_handle, CURLOPT_URL, fname.c_str());
+
+                // check if file exists remotely
+                CURL *curl_err;
+                curl_err    = curl_easy_init();
+                curl_easy_setopt(curl_err, CURLOPT_URL, fname.c_str());
+                curl_easy_setopt(curl_err, CURLOPT_NOBODY, 1L); // Use HEAD request
+                curl_easy_setopt(curl_err, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirects
+                CURLcode iRc = curl_easy_perform(curl_err);
+                long response_code = 0;
+                if (iRc == CURLE_OK) {
+                    curl_easy_getinfo(curl_err, CURLINFO_RESPONSE_CODE, &response_code);
+                }
+                if(iRc != CURLE_OK || response_code != 200) {
+                    throw std::runtime_error("\nFile "+tmpname+" not found on cloud location "+fname+".");
+                }
+
                 // Switch on full protocol/debug output while testing
                 if (verbose) curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 1L);
                 // disable progress meter, set to 0L to enable and disable debug output
@@ -101,10 +117,10 @@ namespace s3 {
                 }
                 // cleanup curl stuff
                 curl_easy_cleanup(curl_handle);
+                curl_easy_cleanup(curl_err);
                 curl_global_cleanup();
 
             }
-            
             
             return_name = tmpname; //to change
         }
