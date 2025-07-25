@@ -20,9 +20,16 @@
 'y_dim'			: 346,       # second dimension of the detector
 
 # Geometry
-'x_offset'              : 0.,        # x offset [mm] (to center the image along x) 
-'y_offset'              : 0.,        # y offset [mm] (to center the image along y)
-'z_offset'              : 240.,     # z offset (along drift direction - term which changes coordinate from GEANT (0 is center of detector) to data reference frame (0 is GEM))
+'MC_xaxis'              : '-z',      # Digitization axis corrisponding to input x - axis (See README to check digitization ref. frame)
+'MC_yaxis'              : '-y',      # Digitization axis corrisponding to input y - axis (See README to check digitization ref. frame)
+'MC_zaxis'              : '-x',      # Digitization axis corrisponding to input z - axis (See README to check digitization ref. frame)
+
+'x_offset'              : 0.,        # Position [mm] of the origin of the input MC ref. frame in the digitization ref. frame along the x axis (of digitization ref. frame)
+'y_offset'              : 0.,        # Position [mm] of the origin of the input MC ref. frame in the digitization ref. frame along the y axis (of digitization ref. frame)
+'z_offset'              : 265.,      # Position [mm] of the origin of the input MC ref. frame in the digitization ref. frame along the z axis (of digitization ref. frame)
+
+'x_extra'               : 0.,        # Extra distance in x (of digitization ref. frame) from center of the image [mm]
+'y_extra'               : 0.,        # Extra distance in y (of digitization ref. frame) from center of the image [mm]
 'z_extra'               : 0.,        # Extra distance from GEM in z coordinate [mm] (drift distance will be (position in simulation along drift)+(z_offset)+(z_extra) )
 'randZ_range'           : 0.,        # Track z coordinate range [mm]. Tracks will be generated uniformly between 'z_hit+randZ_range/2' and 'z_hit-randZ_range/2'
 

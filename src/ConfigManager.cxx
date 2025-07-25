@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <iostream>
 #include <filesystem>
+#include <set>
+#include <stdexcept>
 #include "TFile.h"
 
 bool ConfigManager::loadConfig(const std::string& configFile) {
@@ -133,4 +135,37 @@ double ConfigManager::getDouble(const std::string& key) const {
 
 int ConfigManager::getInt(const std::string& key) const {
     return std::stoi(get(key));
+}
+
+void ConfigManager::validateAxisMappings() {
+    std::set<char> axes_found;
+
+    // List of keys to check
+    const std::vector<std::string> keys = {"MC_xaxis", "MC_yaxis", "MC_zaxis"};
+
+    for (const std::string& key : keys) {
+        if (options.find(key) == options.end()) {
+            throw std::runtime_error("Missing required option: " + key);
+        }
+
+        const std::string& val = options.at(key);
+
+        if (val.empty() || (val[0] != '-' && val.size() != 1) || (val[0] == '-' && val.size() != 2)) {
+            throw std::runtime_error("Invalid axis format for option: " + key + " = '" + val + "'");
+        }
+
+        char axis_char = (val[0] == '-') ? val[1] : val[0];
+
+        if (axis_char != 'x' && axis_char != 'y' && axis_char != 'z') {
+            throw std::runtime_error("Invalid axis character in option: " + key + " = '" + val + "'");
+        }
+
+        axes_found.insert(axis_char);
+    }
+
+    if (axes_found.size() != 3) {
+        throw std::runtime_error("Invalid axis mapping: Must include one 'x', one 'y', and one 'z'.");
+    }
+
+    return;
 }

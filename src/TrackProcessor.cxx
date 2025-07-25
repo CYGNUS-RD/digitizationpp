@@ -681,14 +681,15 @@ vector<double> TrackProcessor::compute_sigma(const double diff_const, const doub
 }
 
 
-vector<double> TrackProcessor::NelGEM2(const vector<double>& energyDep, const vector<double>& z_hit) {
+vector<double> TrackProcessor::NelGEM2(const vector<double>& energyDep, const vector<double>& drift_l) {
     vector<double> n_ioniz_el_ini;
     double opt_pot=config.getDouble("ion_pot");
     transform(energyDep.begin(),energyDep.end(),back_inserter(n_ioniz_el_ini), [&] (double a) { return a/opt_pot;});
-    
-    vector<double> drift_l;
-    int opt_gem=config.getDouble("z_extra");
-    transform(z_hit.begin(),z_hit.end(),back_inserter(drift_l), [&] (double a) { return a+opt_gem;});
+
+    // Old version: z_extra was added here
+    // vector<double> drift_l;
+    // int opt_gem=config.getDouble("z_extra");
+    // transform(z_hit.begin(),z_hit.end(),back_inserter(drift_l), [&] (double a) { return a+opt_gem;});
 
     // Check if hits with negative drift length
     vector<bool> negatives(drift_l.size());

@@ -16,6 +16,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <utility>
 #include "TH2F.h"
 
 // Forward declarations
@@ -121,6 +122,25 @@ private:
       * @param[in] background Reference to 2D image matrix that will contain the pedestal.
       */
      void AddBckg(std::vector<std::vector<int>>& background);
+
+     /**
+     * @brief Parses a MC axis label string and returns the corresponding digititazion axis and sign.
+     *
+     * This function interprets a string like "x", "-y", or "z" to determine which
+     * digitization axis corresponds to a MC axis, and whether that axis is inverted.
+     *
+     * For example:
+     * - "x"   → returns ('x', 1.0)
+     * - "-z"  → returns ('z', -1.0)
+     *
+     * @param axis_label A string representing the axis mapping from the config file.
+     *                   Expected format is one of: "x", "y", "z", "-x", "-y", or "-z".
+     *
+     * @return A pair where:
+     *         - first: the digitization axis as a char ('x', 'y', or 'z')
+     *         - second: a double representing the sign (1.0 or -1.0)
+     */
+     std::pair<char, double> getAxisMapping(const std::string& axis_label);
  
      ConfigManager config;           ///< Configuration manager
      std::string configFile;         ///< Path to the config file

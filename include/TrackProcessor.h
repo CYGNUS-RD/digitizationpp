@@ -161,7 +161,7 @@ private:
     /**
      * @brief Applies GEM2 gain and charge losses to electrons based on z position.
      */
-    std::vector<double> NelGEM2(const std::vector<double>& energyDep,const std::vector<double>& z_hit);
+    std::vector<double> NelGEM2(const std::vector<double>& energyDep,const std::vector<double>& drift_l);
 
     /**
      * @brief Applies saturation function to a certain voxel.

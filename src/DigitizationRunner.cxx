@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits.h>
+#include <utility>
 #include "TRandom3.h"
 #include "TFile.h"
 #include "TTree.h"
@@ -35,6 +36,8 @@ DigitizationRunner::DigitizationRunner(const std::string& configFile_,
         cerr << "Failed to load configuration file: " << configFile << endl;
         exit(EXIT_FAILURE);
     }
+
+    config.validateAxisMappings();
 
     runCount = config.getInt("start_run_number");
 
@@ -184,7 +187,9 @@ void DigitizationRunner::SaveValues(shared_ptr<TFile>& outfile) {
         if(key!="tag"       && key !="Vig_Map" &&
            key!="bckg_path" && key !="ped_cloud_dir" &&
            key!="noiserun"  && key !="bckg_name" &&
-           key!="NR_list"   && key !="Camera_type"
+           key!="NR_list"   && key !="Camera_type" &&
+           key!="MC_xaxis"  && key !="MC_yaxis" &&
+           key!="MC_zaxis"
            )
         {
             TH1F h(string(key).c_str(),"",1,0,1);
@@ -343,6 +348,19 @@ void DigitizationRunner::AddBckg(std::vector<std::vector<int>>& background) {
     }
     return;
 }
+
+
+pair<char, double> DigitizationRunner::getAxisMapping(const string& axis_label) {
+    double sign = 1.0;
+    char axis = axis_label[0];
+    if (axis_label[0] == '-') {
+        sign = -1.0;
+        axis = axis_label[1];
+    }
+    return make_pair(axis, sign);
+}
+
+
 
 // ================================================================================================
 // ================================================================================================
@@ -716,18 +734,64 @@ void DigitizationRunner::processRootFiles() {
                     }
                     
                 } else {
-                    transform(z_hits->begin(),
-                                z_hits->end(),
-                                back_inserter(x_hits_tr),
-                                [&] (double a) {return a + config.getDouble("x_offset");});
-                    transform(y_hits->begin(),
-                                y_hits->end(),
-                                back_inserter(y_hits_tr),
-                                [&] (double a) {return a + config.getDouble("y_offset");});
-                    transform(x_hits->begin(),
-                                x_hits->end(),
-                                back_inserter(z_hits_tr),
-                                [&] (double a) {return -a + config.getDouble("z_offset");});
+                    
+                    // From MC input to digitization reference frame
+                    
+                    // Axis mapping from input MC frame to digitization frame
+                    map<char, std::pair<char, double>> axis_map;
+                    axis_map['x'] = getAxisMapping(config.get("MC_xaxis"));  // MC x axis  = digit. axis, sign
+                    axis_map['y'] = getAxisMapping(config.get("MC_yaxis"));  // MC y axis  = digit. axis, sign
+                    axis_map['z'] = getAxisMapping(config.get("MC_zaxis"));  // MC z axis  = digit. axis, sign
+                    
+                    // Map from MC axis name to the corresponding input hit vector
+                    map<char, const vector<double>*> input_axes;
+                    input_axes['x'] = x_hits;
+                    input_axes['y'] = y_hits;
+                    input_axes['z'] = z_hits;
+
+                    // Map from digitization axis name to the output hit vector
+                    map<char, vector<double>*> output_axes;
+                    output_axes['x'] = &x_hits_tr;
+                    output_axes['y'] = &y_hits_tr;
+                    output_axes['z'] = &z_hits_tr;
+
+                    // Perform transformation for each axis in digitization space
+                    const char axes[3] = {'x', 'y', 'z'};
+                    for (int i = 0; i < 3; ++i) {
+                        char digit_axis = axes[i];
+                        char mc_axis = 'n'; // n stands for still not defined
+                        
+                        // Retrieve the mapped MC axis and sign
+                        for (const auto& pair : axis_map) {
+                            const char map_mc_axis  = pair.first;
+                            char map_digit_axis     = pair.second.first;
+                            if (map_digit_axis == digit_axis) {
+                                mc_axis = map_mc_axis;
+                            }
+                        }
+                        pair<char, double> mapping = axis_map[mc_axis];
+                        double sign = mapping.second;
+                        
+                        // Get input vector (MC) and output vector (digitization)
+                        const vector<double>* input_vec = input_axes[mc_axis];
+                        vector<double>* output_vec = output_axes[digit_axis];
+                    
+                        // Get translation offset from config
+                        string offset_key = string(1, digit_axis) + "_offset";
+                        double offset = config.getDouble(offset_key);
+
+                        // Get extra translation from config
+                        string extra_key = string(1, digit_axis) + "_extra";
+                        double extra = config.getDouble(extra_key);
+                    
+                        // Transform all hits along this axis
+                        transform(input_vec->begin(), input_vec->end(),
+                                  back_inserter(*output_vec),
+                                  [sign, offset, extra](double val) {
+                                      return sign * val + offset + extra;
+                                  });
+                    }
+                    
                     // NOTE: in Geant longitunal TPC axis is towards the GEMs, for the digi it's
                     // assume it's towards the cathode
                     
@@ -735,10 +799,12 @@ void DigitizationRunner::processRootFiles() {
                 }
                     
                 // DEBUG
-                //for(int ihit=0; ihit < numhits; ihit++) {
-                //    cout<<x_hits_tr[ihit]<<",";
-                //    cout<<y_hits_tr[ihit]<<",";
-                //    cout<<z_hits_tr[ihit]<<"\n";
+                //if(entry == 0) {
+                //    for(int ihit=0; ihit < numhits; ihit++) {
+                //       cout<<x_hits_tr[ihit]<<",";
+                //       cout<<y_hits_tr[ihit]<<",";
+                //       cout<<z_hits_tr[ihit]<<"\n";
+                //    }
                 //}
                 
                 vector<double> energy_hits = (*energyDep_hits);
@@ -947,7 +1013,7 @@ void DigitizationRunner::processRootFiles() {
                 for(unsigned int xx =0; xx < array2d_Nph.size(); xx++) {
                     for(unsigned int yy =0; yy < array2d_Nph[0].size(); yy++) {
                         
-                        int binc = background[xx][yy]+(int)array2d_Nph[xx][array2d_Nph[0].size()-1-yy];
+                        int binc = background[xx][yy]+(int)array2d_Nph[xx][yy];
                         final_image.SetBinContent(xx+1, yy+1, binc);
                     }
                 }

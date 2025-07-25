@@ -88,6 +88,14 @@ public:
      */
     int       getInt(const std::string& key) const;
 
+    /**
+     * @brief Validates that the MC axis mapping contains exactly one of each axis: 'x', 'y', and 'z'.
+     *
+     * This ensures that the user did not duplicate or omit any axis in the configuration.
+     * N.B. this assumes the method loadConfig() has already been called
+     */
+    void validateAxisMappings();
+
 private:
     std::map<std::string, std::string> options;  ///< Configuration key-value pairs
     std::map<std::string, std::string> isotopes; ///< Isotope lookup table

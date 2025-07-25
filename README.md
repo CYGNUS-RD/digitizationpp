@@ -82,6 +82,20 @@ and the outdir will be created in
 
 Depending on the system, the outdir folder creation may fail. In that case create the output directory.
 
+## Digitization reference frame
+
+The reference frame (RF) used in digitization is the following:
+* the vertical axis (**y**) is pointing towards the bottom (in this RF gravity acceleration is positive)
+* horizontal axis (**x**) is pointing to the right if we look at the GEMs from the point of view of camera
+* depth axis (**z**) is pointing from GEMs to cathode
+* the **origin** is at the center of the detector/image in xy and on the top face of GEM1 in z
+
+Here's an image showing this RF:
+
+![Example Image](doc/Digi_RF.png)
+
+This means that **the user must specify the relative orientation of the axes and the relative origin offset between the input MC reference frame and the digitization reference frame**. This is realized by means of the parameters `MC_xaxis`, `MC_yaxis`, `MC_zaxis`, and `x_offset`, `y_offset`, `z_offset`.
+
 # Example
 From `<path_to_digitizationpp-dir>`
 
