@@ -18,8 +18,8 @@
 #include <curl/curl.h>
 
 namespace s3 {
-    std::string BUCKET_POSIX_PATH = "/jupyter-workspace/cloud-storage/"; ///< Bucket Posix path on the cloud
-    std::string BUCKET_REST_PATH = "https://s3.cloud.infn.it/v1/AUTH_2ebf769785574195bde2ff418deac08a/"; ///< Bucket rest path on the cloud
+    std::string BUCKET_POSIX_PATH = "/jupyter-workspace/cnaf/"; ///< Bucket Posix path on the cloud
+    std::string BUCKET_REST_PATH = "https://s3.cr.cnaf.infn.it:7480/cygno:"; ///< Bucket rest path on the cloud
 
     std::string mid_file(int run, std::string tag, bool cloud, bool verbose) {
         std::stringstream ss;
