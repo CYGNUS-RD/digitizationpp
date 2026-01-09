@@ -60,7 +60,13 @@ Be careful that this last line can mess the path of the C++ compiler and require
 
 `cmake --build .`
 
+### More experts
 
+You can actually create the build directory where you want (the program understands relative paths) and place the executable where you desire
+
+Assuming
+
+### Generate documentation
 
 Generate documentation inside the `doc/html` folder:
 
