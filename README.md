@@ -62,9 +62,13 @@ Be careful that this last line can mess the path of the C++ compiler and require
 
 ### More experts
 
-You can actually create the build directory where you want (the program understands relative paths) and place the executable where you desire
+You can actually create the build directory where you want (the program understands relative paths) and place the executable where you desire.
 
-Assuming
+Assuming you created builddir somewhere
+
+`cmake <builddir> -DCMAKE_INSTALL_PREFIX=<relative_path_where_you_want_your_executables>`
+
+`cmake --build <builddir> --target install`
 
 ### Generate documentation
 
