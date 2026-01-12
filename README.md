@@ -70,7 +70,7 @@ Assuming you created builddir somewhere
 
 `cmake --build <builddir> --target install`
 
-or (favoured by CMAKE documentation, with sourcedir, the path where you find the CMakeLists.txt)
+or, with sourcedir the path where you find the CMakeLists.txt (favoured by CMAKE documentation)
 
 `cmake -B <builddir> -S <sourcedir>`
 
