@@ -38,6 +38,11 @@ include_directories(${ROOT_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR} ${OpenCV_INCLUDE_DI
 #        message(STATUS "${_variableName}=${${_variableName}}")
 #    endif()
 #endforeach()
+#message(LALA=$ENV{PWD})
+#if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+#  message(LALA=${CMAKE_INSTALL_PREFIX})
+#endif()
+
 
 link_directories(${ROOT_LIBRARY_DIR}
                  "$ENV{ROOTANASYS}/lib"
@@ -84,3 +89,5 @@ add_executable(joinPeds
                )
 target_link_libraries(joinPeds PUBLIC ${ROOT_LIBRARIES} ${OpenCV_LIBS} s3 curl rootana cygnolib z opencv_imgcodecs opencv_core tbb)
 
+install(TARGETS joinPeds DESTINATION .)
+install(TARGETS digitizationpp DESTINATION .)
