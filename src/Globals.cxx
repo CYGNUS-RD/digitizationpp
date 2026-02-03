@@ -14,6 +14,8 @@ double extraction_eff_GEM1 = 0.0, extraction_eff_GEM2 = 0.0, extraction_eff_GEM3
 double omega = 0.0;
 int x_pix = 0, y_pix = 0;
 double optcounts_per_photon = 0.0;
+double camera_electron_rms = 0.0;
+double camera_quantum_efficiency = 0.0;
 double y_sensor_size = 0.0;
 double readout_time = 0.0;
 int num_threads = 1;
