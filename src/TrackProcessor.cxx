@@ -443,10 +443,23 @@ void TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
         // Applying camera response + Poisson smearing
         for_each(hout.begin(), hout.end(),[&](std::vector<int>& v)  {
             transform (v.begin(), v.end(), v.begin(), [&] (int elem){
-                return gRandom->Poisson(elem *
-                                        omega *
-                                        optphotons_per_el *
-                                        optcounts_per_photon);
+                // Generate number of photons reaching camera
+                const int _number_of_photons = gRandom->Poisson(elem *
+                                                                omega *
+                                                                camera_quantum_efficiency *
+                                                                optphotons_per_el);
+
+                // Average number of electrons 
+                const double _mu = static_cast<double>(_number_of_photons) * optcounts_per_photon;
+
+                // Fluctuations of electrons
+                const double _smeared = gRandom-> Gaus(_mu, camera_electron_rms);
+
+                // If negative -> zero
+                const double _nonneg  = (_smeared < 0.0) ? 0.0 : _smeared;
+
+                // Return integer number
+                return static_cast<int>(std::lround(_nonneg));
             });
         });       
         
