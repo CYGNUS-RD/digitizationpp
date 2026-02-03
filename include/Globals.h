@@ -66,6 +66,17 @@ extern int y_pix;
 extern double optcounts_per_photon;
 
 /**
+ * @brief RMS of optical counts (ADU or electrons) per detected photon.
+ */
+extern double camera_electron_rms;
+
+/**
+ * @brief Quantum effeciency of the camera
+ */
+extern double camera_quantum_efficiency;
+
+
+/**
  * @brief Physical size of the camera sensor along the Y axis (in mm).
  */
 extern double y_sensor_size;
