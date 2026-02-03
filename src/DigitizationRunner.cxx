@@ -979,12 +979,13 @@ void DigitizationRunner::processRootFiles() {
                                                         y_hits_tr,
                                                         z_hits_tr,
                                                         energy_hits,
+                                                        VignMap,
                                                         energy,
                                                         NR_flag,
                                                         array2d_Nph
                                                         );
                     
-                } else {// no saturation
+                } else {// no saturation [Fixme: not updated]
                     processTrack.computeWithoutSaturation(x_hits_tr,
                                                         y_hits_tr,
                                                         z_hits_tr,
@@ -1004,13 +1005,6 @@ void DigitizationRunner::processRootFiles() {
                 });
                 // DEBUG
                 cout<<"N_photons = "<<N_photons<<endl;
-                    
-                if(config.getBool("Vignetting")) {
-                    processTrack.TrackVignetting(array2d_Nph,
-                                                x_pix,
-                                                y_pix,
-                                                VignMap);
-                }
                 
                 // Compute always redpix, before possible track cut by exposure of sensor
                 FillRedpix(array2d_Nph, redpix_ix.get(), redpix_iy.get(), redpix_iz.get());

@@ -36,6 +36,7 @@ void TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
                                            const vector<double>& y_hits_tr,
                                            const vector<double>& z_hits_tr,
                                            const vector<double>& energy_hits,
+                                           const TH2F& VignMap,
                                            float energy,
                                            bool NR_flag,
                                            vector<vector<double>>& image)
@@ -439,31 +440,9 @@ void TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
         std::cout << "Time smear " << dur_smear.count() << " seconds" <<std::endl;
         std::cout << "Time Critical " << dur_criti.count() << " seconds" <<std::endl;
         std::cout << "Time ampli " << dur_ampli.count() << " seconds" <<std::endl;
-        
-        // Applying camera response + Poisson smearing
-        for_each(hout.begin(), hout.end(),[&](std::vector<int>& v)  {
-            transform (v.begin(), v.end(), v.begin(), [&] (int elem){
-                // Generate number of photons reaching camera
-                const int _number_of_photons = gRandom->Poisson(elem *
-                                                                omega *
-                                                                camera_quantum_efficiency *
-                                                                optphotons_per_el);
 
-                // Average number of electrons 
-                const double _mu = static_cast<double>(_number_of_photons) * optcounts_per_photon;
 
-                // Fluctuations of electrons
-                const double _smeared = gRandom-> Gaus(_mu, camera_electron_rms);
-
-                // If negative -> zero
-                const double _nonneg  = (_smeared < 0.0) ? 0.0 : _smeared;
-
-                // Return integer number
-                return static_cast<int>(std::lround(_nonneg));
-            });
-        });       
-        
-        // Padding
+        // Padding [Now before camera digitization because needed for VignMap]
         // FIXME: Write a function padding()
         //Define a translation vector
         
@@ -496,6 +475,48 @@ void TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
         int x_end   = min(x_pix*xy_vox_scale, x_start + (int)hout.size());
         int y_end   = min(y_pix*xy_vox_scale, y_start + (int)hout[0].size());
         // cout<<"PADDING ["<<x_start<<":"<<x_end<<","<<y_start<<":"<<y_end<<"]"<<endl;
+
+        vector<vector<double>> VignTmp(x_n_bin, vector<double>(y_n_bin, 0.0));
+        for(int xx=x_start; xx<x_end; xx++){
+            for(int yy=y_start; yy<y_end; yy++){
+                double _vigtmp = 1.0;
+                if(config.getBool("Vignetting")) {
+                    _vigtmp = VignMap.GetBinContent(VignMap.GetXaxis()->FindBin(xx/xy_vox_scale),
+                                                    VignMap.GetYaxis()->FindBin(yy/xy_vox_scale)
+                                                      );
+                }
+                VignTmp[xx-x_start][yy-y_start] = _vigtmp;
+            }
+        }
+
+        for (size_t i = 0; i < hout.size(); ++i) {
+            vector<int>&    hout_row = hout[i];
+            vector<double>& vign_row = VignTmp[i];
+
+            std::transform(hout_row.begin(), hout_row.end(),
+                           vign_row.begin(),
+                           hout_row.begin(),
+                           [&](int elem, double vign_coeff) -> int {
+                // Generate number of photons reaching camera
+                const int _number_of_photons = gRandom->Poisson(static_cast<double>(elem)
+                                                                   * vign_coeff
+                                                                   * omega
+                                                                   * camera_quantum_efficiency
+                                                                   * optphotons_per_el);
+                // Average number of electrons 
+                const double _mu = static_cast<double>(_number_of_photons) * optcounts_per_photon;
+                               
+                // Fluctuations of electrons
+                const double _smeared = gRandom-> Gaus(_mu, camera_electron_rms);
+
+                // If negative -> zero
+                const double _nonneg  = (_smeared < 0.0) ? 0.0 : _smeared;
+
+                // Return integer number
+                return static_cast<int>(std::lround(_nonneg));
+                               
+            });
+        }    
         
         for(int xx=x_start; xx<x_end; xx++){
             for(int yy=y_start; yy<y_end; yy++){
