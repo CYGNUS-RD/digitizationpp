@@ -503,19 +503,20 @@ void TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
                     
                     // Average number of electrons
                     const double _mu = static_cast<double>(_number_of_photons) * optcounts_per_photon;
-                    
-                    // Fluctuations of electrons
-                    if(_mu!=0) {
-                        const double _smeared = gRandom-> Gaus(_mu, camera_electron_rms);
 
-                        // If negative -> zero, but should happen very rarely
-                        const double _nonneg  = (_smeared < 0.0) ? 0.0 : _smeared;
+                    image[ii][jj] = static_cast<int>(_mu);
+                    // Fluctuations of electrons // not needed if we sum random pedestal!!!
+                    // if(_mu!=0) {
+                    //     const double _smeared = gRandom-> Gaus(_mu, camera_electron_rms*optcounts_per_photon);
+
+                    //     // If negative -> zero, but should happen very rarely
+                    //     const double _nonneg  = (_smeared < 0.0) ? 0.0 : _smeared;
     
-                        // Return integer number
-                        image[ii][jj] =  static_cast<int>(std::lround(_nonneg));
-                    } else {
-                        image[ii][jj] = 0;
-                    }
+                    //     // Return integer number
+                    //     image[ii][jj] =  static_cast<int>(std::lround(_nonneg));
+                    // } else {
+                    //     image[ii][jj] = 0;
+                    // }
                 }
             }
         }
