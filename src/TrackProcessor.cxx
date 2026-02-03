@@ -441,7 +441,6 @@ void TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
         std::cout << "Time Critical " << dur_criti.count() << " seconds" <<std::endl;
         std::cout << "Time ampli " << dur_ampli.count() << " seconds" <<std::endl;
 
-
         // Padding [Now before camera digitization because needed for VignMap]
         // FIXME: Write a function padding()
         //Define a translation vector
@@ -476,51 +475,48 @@ void TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
         int y_end   = min(y_pix*xy_vox_scale, y_start + (int)hout[0].size());
         // cout<<"PADDING ["<<x_start<<":"<<x_end<<","<<y_start<<":"<<y_end<<"]"<<endl;
 
-        vector<vector<double>> VignTmp(x_n_bin, vector<double>(y_n_bin, 0.0));
-        for(int xx=x_start; xx<x_end; xx++){
-            for(int yy=y_start; yy<y_end; yy++){
-                double _vigtmp = 1.0;
-                if(config.getBool("Vignetting")) {
-                    _vigtmp = VignMap.GetBinContent(VignMap.GetXaxis()->FindBin(xx/xy_vox_scale),
-                                                    VignMap.GetYaxis()->FindBin(yy/xy_vox_scale)
-                                                      );
-                }
-                VignTmp[xx-x_start][yy-y_start] = _vigtmp;
-            }
-        }
-
-        for (size_t i = 0; i < hout.size(); ++i) {
-            vector<int>&    hout_row = hout[i];
-            vector<double>& vign_row = VignTmp[i];
-
-            std::transform(hout_row.begin(), hout_row.end(),
-                           vign_row.begin(),
-                           hout_row.begin(),
-                           [&](int elem, double vign_coeff) -> int {
-                // Generate number of photons reaching camera
-                const int _number_of_photons = gRandom->Poisson(static_cast<double>(elem)
-                                                                   * vign_coeff
-                                                                   * omega
-                                                                   * camera_quantum_efficiency
-                                                                   * optphotons_per_el);
-                // Average number of electrons 
-                const double _mu = static_cast<double>(_number_of_photons) * optcounts_per_photon;
-                               
-                // Fluctuations of electrons
-                const double _smeared = gRandom-> Gaus(_mu, camera_electron_rms);
-
-                // If negative -> zero
-                const double _nonneg  = (_smeared < 0.0) ? 0.0 : _smeared;
-
-                // Return integer number
-                return static_cast<int>(std::lround(_nonneg));
-                               
-            });
-        }    
-        
+        // Adding voxels to the same pixel before applying camera response
         for(int xx=x_start; xx<x_end; xx++){
             for(int yy=y_start; yy<y_end; yy++){
                 image[xx/xy_vox_scale][yy/xy_vox_scale]+=hout[xx-x_start][yy-y_start];
+            }
+        }
+        
+        // Applying Poisson smearing + camera response
+        for(unsigned int ii = 0; ii<image.size(); ii++) {
+            for(unsigned int jj = 0; jj<image[0].size(); jj++) {
+                if (image[ii][jj] != 0) {
+                    // Vignetting
+                    double _vigtmp = 1.0;
+                    if(config.getBool("Vignetting")) {
+                        _vigtmp = VignMap.GetBinContent(VignMap.GetXaxis()->FindBin(ii),
+                                                        VignMap.GetYaxis()->FindBin(jj)
+                                                          );
+                    }
+                    
+                    // Generate number of photons reaching camera
+                    const int _number_of_photons = gRandom->Poisson(static_cast<double>(image[ii][jj])
+                                                                   * _vigtmp
+                                                                   * omega
+                                                                   * camera_quantum_efficiency
+                                                                   * optphotons_per_el);
+                    
+                    // Average number of electrons
+                    const double _mu = static_cast<double>(_number_of_photons) * optcounts_per_photon;
+                    
+                    // Fluctuations of electrons
+                    if(_mu!=0) {
+                        const double _smeared = gRandom-> Gaus(_mu, camera_electron_rms);
+
+                        // If negative -> zero, but should happen very rarely
+                        const double _nonneg  = (_smeared < 0.0) ? 0.0 : _smeared;
+    
+                        // Return integer number
+                        image[ii][jj] =  static_cast<int>(std::lround(_nonneg));
+                    } else {
+                        image[ii][jj] = 0;
+                    }
+                }
             }
         }
         

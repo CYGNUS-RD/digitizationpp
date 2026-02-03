@@ -993,7 +993,7 @@ void DigitizationRunner::processRootFiles() {
                                                         array2d_Nph
                                                         );
                 }
-
+                cout<<"DEBUG: after compute"<<endl<<flush;
                 auto tb = std::chrono::steady_clock::now();
                 std::chrono::duration<double> durtmp=tb-ta;
                 cout << "Time taken in seconds to compute_cmos_with_saturation is: " << durtmp.count() << endl;
