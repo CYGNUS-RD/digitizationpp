@@ -106,12 +106,16 @@ void DigitizationRunner::prepareCameraSettings() {
     y_pix = 2304;
     if (camera == "Fusion") {
         x_pix = 2304;
-        optcounts_per_photon = 4.; // (Fusion sheet) counts/photon = QE (0.8) / e–/count (0.21)
+        optcounts_per_photon = 1./0.21; // (Fusion sheet) counts/photon = 1. / e–/count (0.21)
+        camera_quantum_efficiency = 0.8;
+        camera_electron_rms = 0.7; // electrons in ultra quiet scan (UQS) [camera datasheet]
         y_sensor_size = 14.976;    // mm
         readout_time  = 184.4;     // ms in in ultra quiet scan (UQS)
     } else if (camera == "Quest1" || camera == "Quest2") {
         x_pix = 4096;
-        optcounts_per_photon = 8.98; // equal to 4.*2.245 which is the ratio of e/count of the two cameras
+        optcounts_per_photon = 1./0.107; // (Quest1 and Quest2 sheet) counts/photon = 1. / e–/count (0.107)
+        camera_quantum_efficiency = 0.85;
+        camera_electron_rms = (camera == "Quest1") ? 0.27 : 0.30; // electrons in ultra quiet scan (UQS) [camera datasheet]
         y_sensor_size = 10.598;      // mm
         readout_time = (camera == "Quest1") ? 199.0 : 39.0; // ms in in ultra quiet scan (UQS)
     }
