@@ -38,6 +38,7 @@ public:
      * @param[in] y_hits_tr Vector of y coordinates of energy deposits.
      * @param[in] z_hits_tr Vector of z coordinates of energy deposits.
      * @param[in] energy_hits_tr Energy deposited at each hit.
+     * @param[in] VignMap The vignetting map.
      * @param[in] energy Total event energy.
      * @param[in] NR_flag Flag indicating if the event is a nuclear recoil.
      * @param[in] image 2D image to be filled with the simulated event.
@@ -46,6 +47,7 @@ public:
                                const std::vector<double>& y_hits_tr,
                                const std::vector<double>& z_hits_tr,
                                const std::vector<double>& energy_hits_tr,
+                               const TH2F& VignMap,
                                float energy,
                                bool NR_flag,
                                std::vector<std::vector<double>>& image);

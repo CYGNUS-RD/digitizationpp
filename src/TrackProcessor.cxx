@@ -36,6 +36,7 @@ void TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
                                            const vector<double>& y_hits_tr,
                                            const vector<double>& z_hits_tr,
                                            const vector<double>& energy_hits,
+                                           const TH2F& VignMap,
                                            float energy,
                                            bool NR_flag,
                                            vector<vector<double>>& image)
@@ -439,18 +440,8 @@ void TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
         std::cout << "Time smear " << dur_smear.count() << " seconds" <<std::endl;
         std::cout << "Time Critical " << dur_criti.count() << " seconds" <<std::endl;
         std::cout << "Time ampli " << dur_ampli.count() << " seconds" <<std::endl;
-        
-        // Applying camera response + Poisson smearing
-        for_each(hout.begin(), hout.end(),[&](std::vector<int>& v)  {
-            transform (v.begin(), v.end(), v.begin(), [&] (int elem){
-                return gRandom->Poisson(elem *
-                                        omega *
-                                        optphotons_per_el *
-                                        optcounts_per_photon);
-            });
-        });       
-        
-        // Padding
+
+        // Padding [Now before camera digitization because needed for VignMap]
         // FIXME: Write a function padding()
         //Define a translation vector
         
@@ -483,10 +474,50 @@ void TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
         int x_end   = min(x_pix*xy_vox_scale, x_start + (int)hout.size());
         int y_end   = min(y_pix*xy_vox_scale, y_start + (int)hout[0].size());
         // cout<<"PADDING ["<<x_start<<":"<<x_end<<","<<y_start<<":"<<y_end<<"]"<<endl;
-        
+
+        // Adding voxels to the same pixel before applying camera response
         for(int xx=x_start; xx<x_end; xx++){
             for(int yy=y_start; yy<y_end; yy++){
                 image[xx/xy_vox_scale][yy/xy_vox_scale]+=hout[xx-x_start][yy-y_start];
+            }
+        }
+        
+        // Applying Poisson smearing + camera response
+        for(unsigned int ii = 0; ii<image.size(); ii++) {
+            for(unsigned int jj = 0; jj<image[0].size(); jj++) {
+                if (image[ii][jj] != 0) {
+                    // Vignetting
+                    double _vigtmp = 1.0;
+                    if(config.getBool("Vignetting")) {
+                        _vigtmp = VignMap.GetBinContent(VignMap.GetXaxis()->FindBin(ii),
+                                                        VignMap.GetYaxis()->FindBin(jj)
+                                                          );
+                    }
+                    
+                    // Generate number of photons reaching camera
+                    const int _number_of_photons = gRandom->Poisson(static_cast<double>(image[ii][jj])
+                                                                   * _vigtmp
+                                                                   * omega
+                                                                   * camera_quantum_efficiency
+                                                                   * optphotons_per_el);
+                    
+                    // Average number of electrons
+                    const double _mu = static_cast<double>(_number_of_photons) * optcounts_per_photon;
+
+                    image[ii][jj] = static_cast<int>(_mu);
+                    // Fluctuations of electrons // not needed if we sum random pedestal!!!
+                    // if(_mu!=0) {
+                    //     const double _smeared = gRandom-> Gaus(_mu, camera_electron_rms*optcounts_per_photon);
+
+                    //     // If negative -> zero, but should happen very rarely
+                    //     const double _nonneg  = (_smeared < 0.0) ? 0.0 : _smeared;
+    
+                    //     // Return integer number
+                    //     image[ii][jj] =  static_cast<int>(std::lround(_nonneg));
+                    // } else {
+                    //     image[ii][jj] = 0;
+                    // }
+                }
             }
         }
         
