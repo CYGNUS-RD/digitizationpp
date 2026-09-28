@@ -19,6 +19,7 @@
 #include <limits.h>
 #include <utility>
 #include <regex>
+#include <algorithm>
 #include "TRandom3.h"
 #include "TFile.h"
 #include "TTree.h"
@@ -629,6 +630,13 @@ void DigitizationRunner::processRootFiles() {
             Float_t z_max_cut = -1;
             Float_t proj_track_2D_cut = -1;
 
+            //First 3 hits for directional algorithms if requested
+            const bool save_mc_first3_hits = config.getBool("save_mc_first3_hits");
+            std::vector<double> mc_first3_x;
+            std::vector<double> mc_first3_y;
+            std::vector<double> mc_first3_z;
+            
+
             int nRedpix;
                 
             // Smart pointer declarations
@@ -708,6 +716,12 @@ void DigitizationRunner::processRootFiles() {
                 outtree->Branch("wav_slow_pmt4", &wav_slow_pmt4);
             }
 
+            if (save_mc_first3_hits) {
+                outtree->Branch("mc_first3_x", &mc_first3_x);
+                outtree->Branch("mc_first3_y", &mc_first3_y);
+                outtree->Branch("mc_first3_z", &mc_first3_z);
+            }
+
             int start = firstentry + digipart * NMAX_EVENTS;
             int stop  = start + NMAX_EVENTS-1;
             if(stop >= lastentry) stop = lastentry;
@@ -724,6 +738,26 @@ void DigitizationRunner::processRootFiles() {
                 }
 
                 inputtree->GetEntry(entry);
+
+                if (save_mc_first3_hits) {
+                    //we record the MC truth for the first 3 hits
+                    mc_first3_x.clear();
+                    mc_first3_y.clear();
+                    mc_first3_z.clear();
+                
+                    const std::size_t ntruth = std::min({
+                        static_cast<std::size_t>(3),
+                        x_hits->size(),
+                        y_hits->size(),
+                        z_hits->size()
+                    });
+                
+                    mc_first3_x.assign(x_hits->begin(), x_hits->begin() + ntruth);
+                    mc_first3_y.assign(y_hits->begin(), y_hits->begin() + ntruth);
+                    mc_first3_z.assign(z_hits->begin(), z_hits->begin() + ntruth);
+                }
+
+                
                 
                 //DEBUG
                 //if(options["NR"]=="True") cout<<particle_type<<endl;

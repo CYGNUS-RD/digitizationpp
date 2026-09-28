@@ -77,6 +77,8 @@
 'queue'                 : 0,	     # If you are sending to the CNAF queue write 1. The outputfiles will be forced to be written in local folder to be sent to cloud
 'redpix_output'         : False,      # True if you want the output format being only the redpixes instead of images and redpixes. NOTE: this will change the output namefile to "digi_RunXXXXX.root"
 
+'save_mc_first3_hits'   : True,       #If True saves the position of the first 3 GEANT hits
+
 ## PMT side
 # PMT simulation parameters
 'pmt_mode'              : True,       # 'True' for PMT simulation
