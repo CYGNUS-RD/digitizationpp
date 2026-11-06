@@ -1009,10 +1009,10 @@ void DigitizationRunner::processRootFiles() {
                 const double max_drift = config.get("max_drift").empty()
                     ? 510. : config.getDouble("max_drift");
 
-                if (!std::isfinite(min_drift) || min_drift <= 0.)
-                    throw std::invalid_argument("min_drift must be finite and positive (mm)");
-                if (!std::isfinite(max_drift) || max_drift <= 0.)
-                    throw std::invalid_argument("max_drift must be finite and positive (mm)");
+                if (!std::isfinite(min_drift) || min_drift < 0.)
+                    throw std::invalid_argument("min_drift must be finite and non-negative (mm)");
+                if (!std::isfinite(max_drift) || max_drift < 0.)
+                    throw std::invalid_argument("max_drift must be finite and non-negative (mm)");
                 vector<double> x_active, y_active, z_active, energy_active;
                 for (size_t i = 0; i < z_hits_tr.size(); ++i) {
                     if (z_hits_tr[i] >= min_drift && z_hits_tr[i] <= max_drift) {
