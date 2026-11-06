@@ -139,6 +139,19 @@ private:
                             std::vector<float>& S3D_y,
                             std::vector<float>& S3D_z);
 
+    /**
+     * @brief Smears electrons whose GEM2 population has already been sampled.
+     * @param[in] nel Number of electrons after GEM2 for each hit (not energy).
+     * @details Clears output vectors and does not call NelGEM2.
+     */
+    void cloud_smearing3D_from_nel(const std::vector<double>& x_hits_tr,
+                                   const std::vector<double>& y_hits_tr,
+                                   const std::vector<double>& z_hits_tr,
+                                   const std::vector<double>& nel,
+                                   std::vector<float>& S3D_x,
+                                   std::vector<float>& S3D_y,
+                                   std::vector<float>& S3D_z);
+
      /**
      * @brief Applies Gaussian smearing to a single axis using local sigma and charge.
      * @param[in] axis_hit Vector of position along the considered axis of energy deposits.

@@ -15,6 +15,8 @@
 #include <chrono>
 #include <numeric>
 #include <random>
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <algorithm>
 #include <iostream>
@@ -56,6 +58,12 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
     }
     // if there are electrons on GEM3, apply saturation effect
     else {
+        // Sample primaries and GEM gains once for all input hits of this call.
+        // nel[h] is the post-GEM2 population, not the primary count.
+        // If the caller filtered hits, the primary metadata covers that subset.
+        const vector<double> nel = NelGEM2(energy_hits, z_hits_tr);
+        if (nel.empty()) return false;
+
         double OFF = 15;
         double OFFz = 10.;
 
@@ -66,12 +74,9 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
         double zmin = (*min_element(z_hits_tr.begin(), z_hits_tr.end()))-OFFz;
         double zmax = (*max_element(z_hits_tr.begin(), z_hits_tr.end()))+OFFz;
         
-        double deltaX = abs(xmax-xmin);
-        double deltaY = abs(ymax-ymin);
-        
         // FIXME: create a function for the saturation loop
-        // FIXME: find best value of maxvolume. 1e8 might not me the best one
-        long int max_3Dhisto_volume=(long int)5e+7;  // (volume in number of voxels) that's around 0.5*1.6 GB of RAM
+        // This limits dense histogram cells, not total process memory.
+        long int max_3Dhisto_volume=(long int)5e+7;  // 5e7 doubles: about 400 MB, excluding vector overhead.
 
         int xy_vox_scale = config.getInt("xy_vox_scale");
         
@@ -84,7 +89,8 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
         long int y_n_bin = Utils::roundUpToEven((ymax-ymin)/ybin_dim);
         long int z_n_bin_MAX = Utils::roundUpToEven((zmax-zmin)/zbin_dim);
         
-        // If voxel regions <= 2 -> use the standard algorithm, otherwise use the map algorithm
+        // Preserve the existing energy-per-voxel heuristic: sparse map at low
+        // occupancy, dense slabs above the threshold.
         bool map_algorithm = true;
         if(energy/(x_n_bin * y_n_bin * z_n_bin_MAX)>1e-6) map_algorithm = false;
 
@@ -108,6 +114,8 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
         vector<vector<int>> hout(x_n_bin, vector<int>(y_n_bin, 0.0));
         
         if(map_algorithm) {
+            // The sparse map combines all hit batches before saturation.
+            // WID bounds hits per batch, not amplified electrons or map size.
             z_n_bin = z_n_bin_MAX;
             map<long int, int> hcmap;
             //long int L = x_n_bin-1;
@@ -117,6 +125,7 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
             if((NR_flag==true && energy>100)||(NR_flag==false && energy>500)) {
                 
                 int WID = config.getInt("WID");
+                if (WID <= 0) return false;
                 int nparts = (x_hits_tr.size() + WID - 1)/WID;
                 for(int part = 0; part < nparts; part++) {
                     cout<<"   part "<<part<<"/"<<nparts<<"..."<<endl;
@@ -126,13 +135,13 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
                     S3D_y.clear();
                     S3D_z.clear();
                     
-                    vector<double> x_hits_tr_i(&x_hits_tr[hit_tr_idx], &x_hits_tr[hit_tr_idx_up]);
-                    vector<double> y_hits_tr_i(&y_hits_tr[hit_tr_idx], &y_hits_tr[hit_tr_idx_up]);
-                    vector<double> z_hits_tr_i(&z_hits_tr[hit_tr_idx], &z_hits_tr[hit_tr_idx_up]);
-                    vector<double> energy_hits_i(&energy_hits[hit_tr_idx], &energy_hits[hit_tr_idx_up]);
+                    vector<double> x_hits_tr_i(x_hits_tr.begin() + hit_tr_idx, x_hits_tr.begin() + hit_tr_idx_up);
+                    vector<double> y_hits_tr_i(y_hits_tr.begin() + hit_tr_idx, y_hits_tr.begin() + hit_tr_idx_up);
+                    vector<double> z_hits_tr_i(z_hits_tr.begin() + hit_tr_idx, z_hits_tr.begin() + hit_tr_idx_up);
+                    vector<double> nel_i(nel.begin() + hit_tr_idx, nel.begin() + hit_tr_idx_up);
                 
                     auto startsmear = std::chrono::steady_clock::now();
-                    cloud_smearing3D(x_hits_tr_i, y_hits_tr_i, z_hits_tr_i, energy_hits_i, S3D_x, S3D_y, S3D_z);
+                    cloud_smearing3D_from_nel(x_hits_tr_i, y_hits_tr_i, z_hits_tr_i, nel_i, S3D_x, S3D_y, S3D_z);
                     auto endsmear = std::chrono::steady_clock::now();
                     dur_smear=dur_smear+endsmear-startsmear;
                     size_tot+=S3D_z.size();
@@ -151,7 +160,7 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
                     // Run the default parallelism
                     tbb::task_arena arena(num_threads);
                     arena.execute([&]{
-                        parallel_for(tbb::blocked_range<size_t>(0, indices.size(),indices.size()/num_threads),
+                        parallel_for(tbb::blocked_range<size_t>(0, indices.size(),max<size_t>(1, indices.size()/max(1, num_threads))),
                             [&] (auto &range) {
                             map<long int, int> paralmap;
                             //cout << "Thread ID: " << this_thread::get_id() << endl;
@@ -219,10 +228,7 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
             } else {
 
                 auto startsmear = std::chrono::steady_clock::now();
-                if(!cloud_smearing3D(x_hits_tr, y_hits_tr, z_hits_tr, energy_hits, S3D_x, S3D_y, S3D_z)) {
-                    std::cerr << "Warning: TrackProcessor::computeWithSaturation: skipping this track because of error from TrackProcessor::cloud_smearing3D."<<std::endl;
-                    return false;
-                }
+                cloud_smearing3D_from_nel(x_hits_tr, y_hits_tr, z_hits_tr, nel, S3D_x, S3D_y, S3D_z);
                 auto endsmear = std::chrono::steady_clock::now();
                 dur_smear=dur_smear+endsmear-startsmear;
                 size_tot+=S3D_z.size();
@@ -240,7 +246,7 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
                 // Run the default parallelism
                 tbb::task_arena arena(num_threads);
                 arena.execute([&]{
-                    parallel_for(tbb::blocked_range<size_t>(0, indices.size(),indices.size()/num_threads),
+                    parallel_for(tbb::blocked_range<size_t>(0, indices.size(),max<size_t>(1, indices.size()/max(1, num_threads))),
                         [&] (auto &range) {
                         map<long int, int> paralmap;
                         //cout << "Thread ID: " << this_thread::get_id() << endl;
@@ -308,201 +314,158 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
             }
 
         } else {
-            double deltaZ=max(2*config.getDouble("z_vox_dim"),
-                              config.getDouble("z_vox_dim") * max_3Dhisto_volume /
-                                (deltaX / xbin_dim) /
-                                (deltaY / ybin_dim)
-                              );
-            
-            vector<double> split_vals = Utils::arange(zmin, zmax, deltaZ);
-            if(split_vals[split_vals.size()-1] < zmax) split_vals.push_back(zmax+deltaZ/10.);
-        
-        
-        
-            for(unsigned int i=0; i < split_vals.size()-1; i++) {
-                
-                z_n_bin  = max(2.0, Utils::roundUpToEven((split_vals[i+1]-split_vals[i])/zbin_dim));
-                
-                vector<vector<vector<double>>> hc(x_n_bin+1,
-                                                  vector<vector<double>>(y_n_bin+1,
-                                                                         vector<double>(z_n_bin+1, 0.0)));
-                
-                if((NR_flag==true && energy>100)||(NR_flag==false && energy>500)) {
-                    
 
-                    int WID = config.getInt("WID");
-                    int nparts = (x_hits_tr.size() + WID - 1)/WID;
-                    
-                    //cout<<"DEBUG "<<hc.size()<<","<<hc[0].size()<<","<<hc[0][0].size()<<endl<<flush;
-                    cout<<"Amplifying voxel region z=["<<split_vals[i]<<","<<split_vals[i+1]<<"] "<<i<<"/"<<split_vals.size()-1-1<<endl;
-                    
-                    for(int part = 0; part < nparts; part++) {
-                        cout<<"   part "<<part<<"/"<<nparts<<"..."<<endl;
-                        int hit_tr_idx = part*WID;
-                        int hit_tr_idx_up = min((part+1)*WID,(int)x_hits_tr.size());
-                        S3D_x.clear();
-                        S3D_y.clear();
-                        S3D_z.clear();
-                    
-                        vector<double> x_hits_tr_i(&x_hits_tr[hit_tr_idx], &x_hits_tr[hit_tr_idx_up]);
-                        vector<double> y_hits_tr_i(&y_hits_tr[hit_tr_idx], &y_hits_tr[hit_tr_idx_up]);
-                        vector<double> z_hits_tr_i(&z_hits_tr[hit_tr_idx], &z_hits_tr[hit_tr_idx_up]);
-                        vector<double> energy_hits_i(&energy_hits[hit_tr_idx], &energy_hits[hit_tr_idx_up]);
-                        
-                        //cout<<"Smearing..."<<endl<<flush;
-                        auto startsmear = std::chrono::steady_clock::now();
-                        if(!cloud_smearing3D(x_hits_tr_i, y_hits_tr_i, z_hits_tr_i, energy_hits_i, S3D_x, S3D_y, S3D_z)) {
-                            std::cerr << "Warning: TrackProcessor::computeWithSaturation: skipping this track because of error from TrackProcessor::cloud_smearing3D."<<std::endl;
-                            return false;
-                        }
-                        auto endsmear = std::chrono::steady_clock::now();
-                        dur_smear=dur_smear+endsmear-startsmear;
-                        size_tot+=S3D_z.size();
-
-                        //cout<<"----- x "<<S3D_x.size()<<endl<<flush;
-                        //cout<<"----- y "<<S3D_y.size()<<endl<<flush;
-                        //cout<<"----- z "<<S3D_z.size()<<endl<<flush;
-                        
-                        //cout<<"Getting the vector to store all indices"<<endl<<flush;
-                        // Vector to store all indices
-                        vector<size_t> allindices(S3D_z.size());
-                        // Fill indices with 0, 1, 2, ..., numbers.size() - 1
-                        iota(allindices.begin(), allindices.end(), 0);
-                        
-                        auto startcriti = std::chrono::steady_clock::now();
-                        //cout<<"Getting the indices where split_vals[i] <= S3D_z < split_vals[i+1]"<<endl<<flush;
-                        // Getting the indices where split_vals[i] <= S3D_z < split_vals[i+1]
-                        vector<size_t> indices;
-                        copy_if(allindices.begin(), allindices.end(), back_inserter(indices), [&](size_t n) {
-                            return ( S3D_z[n] >= split_vals[i] && S3D_z[n] < split_vals[i+1]);
-                        });
-                        
-                        if(indices.size()==0) continue;
-                        
-                        // THIS IS THE COMPUTATIONALLY EXPENSIVE PART
-                        for_each(indices.begin(), indices.end(), [&](int ihit) {
-                            int xx = floor((S3D_x[ihit]- xmin)/ xbin_dim);
-                            int yy = floor((S3D_y[ihit]- ymin)/ ybin_dim);
-                            int zz = floor((S3D_z[ihit]-split_vals[i])/ zbin_dim);
-                            hc[xx][yy][zz] += 1.;
-                        });
-                        auto endcriti = std::chrono::steady_clock::now();
-                        dur_criti=dur_criti+endcriti-startcriti;
-
-                    }
-
-                    long int LL = (x_n_bin)*(y_n_bin)*(z_n_bin);
-                    long int not_empty=0;
-                    auto startampli = std::chrono::steady_clock::now();
-                    
-                    // Applying GEM3 amplification
-                    for(int xx = 0; xx<x_n_bin-1; xx++){
-                        for(int yy=0; yy<y_n_bin-1; yy++) {
-                            for(int zz=0; zz<z_n_bin-1; zz++){
-                                if(hc[xx][yy][zz] != 0.) {
-                                    not_empty++;
-                                    // optbeta is multiplied by factors to normalize on volume chosen
-                                    double n_ph_val = Nph_saturation(hc[xx][yy][zz], optA, optbeta*xy_vox_scale*xy_vox_scale*0.1/zbin_dim);
-
-                                    hout[xx][yy] += n_ph_val;
-                                    
-                                    // --- PMT Simulation Integration ---
-                                    if (n_ph_val > 0) {
-                                        PMTVoxel voxel;
-                                        // Convert bin indices back to physical coordinates (mm)
-                                        voxel.x = (xx * xbin_dim) + xmin;
-                                        voxel.y = (yy * ybin_dim) + ymin;
-                                        voxel.z = (zz * zbin_dim) + split_vals[i];
-                                        
-                                        voxel.n_photons = n_ph_val;
-                                        pmt_voxels.push_back(voxel);
-                                    }   
-                                }
-                            }
-                        }
-                    }
-                    auto endampli = std::chrono::steady_clock::now();
-                    dur_ampli=dur_ampli+endampli-startampli;
-                    cout<<"Sparse-ness of voxel region: "<< not_empty * 100./LL<<" %"<<endl;
-
-
-                } else {
-                    auto startsmear = std::chrono::steady_clock::now();
-                    if(!cloud_smearing3D(x_hits_tr, y_hits_tr, z_hits_tr, energy_hits, S3D_x, S3D_y, S3D_z)) {
-                        std::cerr << "Warning: TrackProcessor::computeWithSaturation: skipping this track because of error from TrackProcessor::cloud_smearing3D."<<std::endl;
-                        return false;
-                    }
-                    auto endsmear = std::chrono::steady_clock::now();
-                    dur_smear=dur_smear+endsmear-startsmear;
-                    size_tot+=S3D_z.size();
-
-                    // Vector to store all indices
-                    vector<size_t> allindices(S3D_z.size());
-                    // Fill indices with 0, 1, 2, ..., numbers.size() - 1
-                    iota(allindices.begin(), allindices.end(), 0);
-                    
-                    auto startcriti = std::chrono::steady_clock::now(); 
-                    // Getting the indices where split_vals[i] <= S3D_z < split_vals[i+1]
-                    vector<size_t> indices;
-                    copy_if(allindices.begin(), allindices.end(), back_inserter(indices), [&](size_t n) {
-                        return ( S3D_z[n] >= split_vals[i] && S3D_z[n] < split_vals[i+1]);
-                    });
-                    
-                    if(indices.size()==0) continue;
-                    
-                    //cout<<"DEBUG "<<hc.size()<<","<<hc[0].size()<<","<<hc[0][0].size()<<endl<<flush;
-                    cout<<"Amplifying voxel region z=["<<split_vals[i]<<","<<split_vals[i+1]<<"] "<<i<<"/"<<split_vals.size()-1-1<<endl;
-                    
-                    // THIS IS THE COMPUTATIONALLY EXPENSIVE PART
-                    for_each(indices.begin(), indices.end(), [&](int ihit) {
-                        int xx = floor((S3D_x[ihit]- xmin)/ xbin_dim);
-                        int yy = floor((S3D_y[ihit]- ymin)/ ybin_dim);
-                        int zz = floor((S3D_z[ihit]-split_vals[i])/ zbin_dim);
-                        hc[xx][yy][zz] += 1.;
-                    });
-                    auto endcriti = std::chrono::steady_clock::now();
-                    dur_criti=dur_criti+endcriti-startcriti;
-                    
-
-                    long int LL = (x_n_bin)*(y_n_bin)*(z_n_bin);
-                    long int not_empty=0;
-                    
-                    auto startampli = std::chrono::steady_clock::now();
-                    // Applying GEM3 amplification
-                    
-                    
-                    
-                    for(int xx = 0; xx<x_n_bin-1; xx++){
-                        for(int yy=0; yy<y_n_bin-1; yy++) {
-                            for(int zz=0; zz<z_n_bin-1; zz++){
-                                if(hc[xx][yy][zz] != 0.) {
-                                    not_empty++;
-                                    // optbeta is multiplied by factors to normalize on volume chosen
-                                    double n_ph_val = Nph_saturation(hc[xx][yy][zz], optA, optbeta*xy_vox_scale*xy_vox_scale*0.1/zbin_dim);
-
-                                    hout[xx][yy] += n_ph_val;
-
-                                    // --- PMT Simulation Integration ---
-                                    if (n_ph_val > 0) {
-                                        PMTVoxel voxel;
-                                        // Convert bin indices back to physical coordinates (mm)
-                                        voxel.x = (xx * xbin_dim) + xmin;
-                                        voxel.y = (yy * ybin_dim) + ymin;
-                                        voxel.z = (zz * zbin_dim) + split_vals[i];
-                                        
-                                        voxel.n_photons = n_ph_val;
-                                        pmt_voxels.push_back(voxel);
-                                    } 
-                                }
-                            }
-                        }
-                    }
-                    auto endampli = std::chrono::steady_clock::now();
-                    dur_ampli=dur_ampli+endampli-startampli;
-                    cout<<"Sparse-ness of voxel region: "<< not_empty * 100./LL<<" %"<<endl;
-                }
+            // Slabs are groups of bins of one global z grid.
+            // hc has exactly these dimensions (no unused +1 borders).
+            const long int xy_volume = x_n_bin * y_n_bin;
+            if (xy_volume <= 0 || xy_volume > max_3Dhisto_volume) {
+                cerr << "A single xy plane exceeds max_3Dhisto_volume." << endl;
+                return false;
             }
-            
+            const long int slab_bins = max_3Dhisto_volume / xy_volume;
+            const auto sigma_x = compute_sigma(config.getDouble("diff_const_sigma0T"), config.getDouble("diff_coeff_T"), z_hits_tr);
+            const auto sigma_z = compute_sigma(config.getDouble("diff_const_sigma0L"), config.getDouble("diff_coeff_L"), z_hits_tr);
+            // One integer counter per hit; no full-event coordinate cloud.
+            // NelGEM2 already rounded these populations to integer values.
+            vector<long long> nel_remaining(nel.size());
+            for (size_t h = 0; h < nel.size(); ++h) {
+                if (!isfinite(nel[h]) || nel[h] < 0 || nel[h] >= static_cast<double>(numeric_limits<long long>::max()) ||
+                    !isfinite(sigma_x[h]) || !isfinite(sigma_z[h])) return false;
+                nel_remaining[h] = static_cast<long long>(nel[h]);
+            }
+
+            // Adapter to use an efficient binomial with the existing ROOT RNG.
+            // This adapter owns no RNG state: each call advances gRandom.
+            // The standard distribution expects an integer-producing callable.
+            // 4294967296 is 2^32; scaling Rndm() supplies 32-bit integers.
+            // min/max declare the adapter range; operator() makes random() callable.
+            struct RootEngine {
+                using result_type = uint32_t;
+                static constexpr result_type min() { return 0; }
+                static constexpr result_type max() { return numeric_limits<result_type>::max(); }
+                result_type operator()() { return static_cast<result_type>(gRandom->Rndm() * 4294967296.0); }
+            } random;
+            // Draw a count, not coordinates: Binomial(n, probability).
+            // Handle certain outcomes without consuming random numbers.
+            auto draw = [&](long long n, double probability) -> long long {
+                if (n == 0 || probability <= 0.) return 0;
+                if (probability >= 1.) return n;
+                return binomial_distribution<long long>(n, probability)(random);
+            };
+            // P(Z >= edge) for a Gaussian with the given mean and sigma.
+            // erfc evaluates the upper tail directly instead of subtracting
+            // a CDF close to one. A zero-width Gaussian is a point mass.
+            auto survival = [](double edge, double mean, double sigma) {
+                if (sigma == 0.) return mean >= edge ? 1. : 0.;
+                return 0.5 * erfc((edge - mean) / (sqrt(2.) * sigma));
+            };
+
+            // Remove the lower Gaussian tail once; the upper tail is
+            // whatever remains after the final bin. Neither is forced inside.
+            for (size_t h = 0; h < nel.size(); ++h)
+                nel_remaining[h] = draw(nel_remaining[h], survival(zmin, z_hits_tr[h], sigma_z[h]));
+
+            // Persistent streams for logical workers: initialized once, never
+            // reset between bins/blocks/slabs. This avoids repeating clouds.
+            // Each logical worker owns one stream, regardless of the OS thread
+            // TBB schedules it on. Seeding is serial; worker draws are disjoint.
+            const int workers = max(1, num_threads);
+            vector<TRandom3> paralrandom;
+            paralrandom.reserve(workers);
+            for (int w = 0; w < workers; ++w)
+                paralrandom.emplace_back(1u + gRandom->Integer(4294967295u));
+            tbb::task_arena arena(workers);
+
+            // Two float arrays of this length use about 512 KiB together.
+            // Unlike WID (previous implementation), this also bounds a single highly amplified hit.
+            const long long max_smear_electrons = 65536;
+
+            for (long int first_z = 0; first_z < z_n_bin_MAX; first_z += slab_bins) {
+                // first_z is global; zz below is local to this slab.
+                // The last slab may contain fewer bins.
+                z_n_bin = min(slab_bins, z_n_bin_MAX - first_z);
+                vector<vector<vector<double>>> hc(x_n_bin,
+                    vector<vector<double>>(y_n_bin, vector<double>(z_n_bin, 0.)));
+
+                for (long int zz = 0; zz < z_n_bin; ++zz) {
+                    const double low = zmin + (first_z + zz) * zbin_dim;
+                    const double high = zmin + (first_z + zz + 1) * zbin_dim;
+                    for (size_t h = 0; h < nel.size(); ++h) {
+                        // Conditional binomial: assign each electron to at most
+                        // one z bin. This is Gaussian smearing directly in bins.
+                        const double qlow = survival(low, z_hits_tr[h], sigma_z[h]);
+                        const double qhigh = survival(high, z_hits_tr[h], sigma_z[h]);
+                        // Remaining electrons are conditioned on Z >= low:
+                        // P(low <= Z < high | Z >= low) = 1 - qhigh/qlow.
+                        // Clamp floating-point roundoff. If qlow underflows to
+                        // zero, the fallback assigns any numerical residue here.
+                        const double probability = qlow > 0. ? clamp(1. - qhigh / qlow, 0., 1.) : 1.;
+                        long long count = draw(nel_remaining[h], probability);
+                        // Remove the assigned population before proceeding:
+                        // the same electron cannot be assigned to another bin.
+                        nel_remaining[h] -= count;
+                        while (count > 0) {
+                            const long long block = min(count, max_smear_electrons);
+                            auto startsmear = chrono::steady_clock::now();
+                            // Bounded x/y cloud; z is already a bin.
+                            S3D_x.resize(block); S3D_y.resize(block);
+                            // Every element is overwritten, even when resize
+                            // reuses capacity. Workers write disjoint intervals.
+                            arena.execute([&] {
+                                tbb::parallel_for(tbb::blocked_range<int>(0, workers, 1), [&](auto& range) {
+                                    for (int w = range.begin(); w < range.end(); ++w) {
+                                        const long long begin = block * w / workers;
+                                        const long long end = block * (w + 1) / workers;
+                                        for (long long j = begin; j < end; ++j) {
+                                            S3D_x[j] = paralrandom[w].Gaus(x_hits_tr[h], sigma_x[h]);
+                                            S3D_y[j] = paralrandom[w].Gaus(y_hits_tr[h], sigma_x[h]);
+                                        }
+                                    }
+                                });
+                            });
+                            dur_smear += chrono::steady_clock::now() - startsmear;
+                            size_tot += block;
+                            // arena.execute has completed: accumulate serially
+                            // so histogram increments do not race. Gaussian x/y
+                            // tails outside the grid are discarded explicitly.
+                            auto startcriti = chrono::steady_clock::now();
+                            for (size_t j = 0; j < S3D_x.size(); ++j) {
+                                const long int xx = floor((S3D_x[j] - xmin) / xbin_dim);
+                                const long int yy = floor((S3D_y[j] - ymin) / ybin_dim);
+                                if (xx >= 0 && xx < x_n_bin && yy >= 0 && yy < y_n_bin)
+                                    hc[xx][yy][zz] += 1.;
+                            }
+                            dur_criti += chrono::steady_clock::now() - startcriti;
+                            count -= block;
+                        }
+                    }
+                }
+                // Apply the nonlinear response to complete voxel populations:
+                // saturating separate hit/block contributions would be incorrect.
+                auto startampli = chrono::steady_clock::now();
+                for (long int xx = 0; xx < x_n_bin; ++xx)
+                    for (long int yy = 0; yy < y_n_bin; ++yy)
+                        for (long int zz = 0; zz < z_n_bin; ++zz) {
+                            if (hc[xx][yy][zz] == 0.) continue;
+                            // Nph_saturation currently accepts int. If this single voxel contains more electrons than the maximum that can be represented by a double, stop the digitization
+                            if (hc[xx][yy][zz] > numeric_limits<int>::max()) return false;
+
+                            const double n_ph_val = Nph_saturation(static_cast<int>(hc[xx][yy][zz]), optA, optbeta * xy_vox_scale * xy_vox_scale * 0.1 / zbin_dim);
+                            hout[xx][yy] += n_ph_val;
+                            
+                            if (n_ph_val > 0.) {
+                                PMTVoxel voxel;
+                                voxel.x = xx * xbin_dim + xmin;
+                                voxel.y = yy * ybin_dim + ymin;
+                                // Keep the existing lower-bin-edge convention,
+                                // using the global z index for PMT coordinates.
+                                voxel.z = (first_z + zz) * zbin_dim + zmin;
+                                voxel.n_photons = n_ph_val;
+                                pmt_voxels.push_back(voxel);
+                            }
+                        }
+                dur_ampli += chrono::steady_clock::now() - startampli;
+            }
         }
 
         cout<<"size = "<<size_tot<<endl;
@@ -597,6 +560,29 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
 
 }
 
+// Sparse-path helper: smear an already sampled post-GEM2 population.
+// The caller supplies one nel entry per hit. Unlike cloud_smearing3D, this
+// method never samples charge. Clear outputs because smear_parallel appends.
+void TrackProcessor::cloud_smearing3D_from_nel(const vector<double>& x_hits_tr,
+                                              const vector<double>& y_hits_tr,
+                                              const vector<double>& z_hits_tr,
+                                              const vector<double>& nel,
+                                              vector<float>& S3D_x,
+                                              vector<float>& S3D_y,
+                                              vector<float>& S3D_z) {
+    S3D_x.clear();
+    S3D_y.clear();
+    S3D_z.clear();
+
+    const auto sigma_x = compute_sigma(config.getDouble("diff_const_sigma0T"), config.getDouble("diff_coeff_T"), z_hits_tr);
+    const auto sigma_y = sigma_x;
+    const auto sigma_z = compute_sigma(config.getDouble("diff_const_sigma0L"), config.getDouble("diff_coeff_L"), z_hits_tr);
+    smear_parallel(x_hits_tr, y_hits_tr, z_hits_tr, sigma_x, sigma_y, sigma_z,
+                   nel, S3D_x, S3D_y, S3D_z);
+}
+
+// Legacy energy-based entry point: this still samples charge internally.
+// computeWithSaturation deliberately uses the from_nel helper instead.
 bool TrackProcessor::cloud_smearing3D(const vector<double>& x_hits_tr,
                                       const vector<double>& y_hits_tr,
                                       const vector<double>& z_hits_tr,
@@ -697,7 +683,7 @@ void TrackProcessor::smear_parallel(const vector<double>& x_axis_hit,const vecto
     // Run the default parallelism
     tbb::task_arena arena(num_threads);
     arena.execute([&]{
-        parallel_for(tbb::blocked_range<size_t>(0, indices.size(),indices.size()/num_threads),
+        parallel_for(tbb::blocked_range<size_t>(0, indices.size(),max<size_t>(1, indices.size()/max(1, num_threads))),
             [&] (auto &range) {
             vector<float> x_paralvec,y_paralvec,z_paralvec;
             TRandom3 paralrandom;
@@ -773,6 +759,8 @@ vector<double> TrackProcessor::NelGEM2(const vector<double>& energyDep, const ve
         return gRandom->Poisson(a);
     });
 
+    // Primary metadata is recorded before GEM multiplication.
+    // The saturation path calls this once for its complete input hit set.
     N_primaries_reaching_GEMs = std::accumulate(n_ioniz_el.begin(), n_ioniz_el.end(), 0.0);
     std::cout << "Number of primaries reaching GEMs: " << N_primaries_reaching_GEMs << std::endl;
     
