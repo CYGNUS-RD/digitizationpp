@@ -139,6 +139,22 @@ private:
                             std::vector<float>& S3D_y,
                             std::vector<float>& S3D_z);
 
+    /**
+     * @brief As cloud_smearing3D, but the drift diffusion acts on each PRIMARY
+     * electron (before amplification) and only sigma_0 on the electrons of its
+     * avalanche, so the electrons of one primary stay together. Enabled by
+     * 'primary_granularity' : True. Same mean spot (variance sigma_0^2 + D^2 z
+     * per electron), but with the cluster-to-cluster and edge fluctuations of
+     * ~E/W primaries instead of ~1e5 independent electrons.
+     */
+    bool cloud_smearing3D_primaries(const std::vector<double>& x_hits_tr,
+                                    const std::vector<double>& y_hits_tr,
+                                    const std::vector<double>& z_hits_tr,
+                                    const std::vector<double>& energy_hits_tr,
+                                    std::vector<float>& S3D_x,
+                                    std::vector<float>& S3D_y,
+                                    std::vector<float>& S3D_z);
+
      /**
      * @brief Applies Gaussian smearing to a single axis using local sigma and charge.
      * @param[in] axis_hit Vector of position along the considered axis of energy deposits.

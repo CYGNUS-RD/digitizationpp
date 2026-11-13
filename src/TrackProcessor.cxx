@@ -605,6 +605,11 @@ bool TrackProcessor::cloud_smearing3D(const vector<double>& x_hits_tr,
                                       vector<float>& S3D_y,
                                       vector<float>& S3D_z) {
 
+    // per-primary diffusion (optional; key absent -> false -> original behaviour)
+    if (config.getBool("primary_granularity"))
+        return cloud_smearing3D_primaries(x_hits_tr, y_hits_tr, z_hits_tr, energy_hits,
+                                          S3D_x, S3D_y, S3D_z);
+
     vector<double> nel = NelGEM2(energy_hits, z_hits_tr);
     if (nel.empty()) {
         std::cerr << "Warning: TrackProcessor::cloud_smearing3D: skipping this track because of empty result from TrackProcessor::NelGEM2."<<std::endl;
@@ -632,6 +637,60 @@ bool TrackProcessor::cloud_smearing3D(const vector<double>& x_hits_tr,
     //    cout<<S3D_x[i]<<endl;
     //}
 
+    return true;
+}
+
+
+bool TrackProcessor::cloud_smearing3D_primaries(const vector<double>& x_hits_tr,
+                                                const vector<double>& y_hits_tr,
+                                                const vector<double>& z_hits_tr,
+                                                const vector<double>& energy_hits,
+                                                vector<float>& S3D_x,
+                                                vector<float>& S3D_y,
+                                                vector<float>& S3D_z) {
+
+    for (double z : z_hits_tr) {
+        if (z < 0) {
+            std::cerr << "Warning: TrackProcessor::cloud_smearing3D_primaries: track contains hits with negative drift length." << std::endl;
+            return false;
+        }
+    }
+
+    const double ion_pot = config.getDouble("ion_pot");
+    const double lambda  = config.getDouble("absorption_l");
+    const double s0T = sqrt(config.getDouble("diff_const_sigma0T"));   // transfer gaps etc. [mm]
+    const double s0L = sqrt(config.getDouble("diff_const_sigma0L"));
+    const double DT2 = config.getDouble("diff_coeff_T");               // [mm^2/cm]
+    const double DL2 = config.getDouble("diff_coeff_L");
+    const double gain12 = extraction_eff_GEM1 * GEM2_gain * extraction_eff_GEM2;
+
+    // one entry per primary: its position after the drift and its avalanche size
+    vector<double> px, py, pz, nel;
+    long int n_prim_tot = 0;
+    for (size_t i = 0; i < x_hits_tr.size(); i++) {
+        const double z = z_hits_tr[i];
+        // primaries of this hit reaching the GEMs (attachment), as in NelGEM2
+        const int np = gRandom->Poisson(energy_hits[i] / ion_pot * exp(-z / lambda));
+        n_prim_tot += np;
+        // drift diffusion only (sigma_0 is applied below, per avalanche electron)
+        const double sdT = sqrt(DT2 * z / 10.0);
+        const double sdL = sqrt(DL2 * z / 10.0);
+        for (int j = 0; j < np; j++) {
+            px.push_back(gRandom->Gaus(x_hits_tr[i], sdT));
+            py.push_back(gRandom->Gaus(y_hits_tr[i], sdT));
+            pz.push_back(gRandom->Gaus(z_hits_tr[i], sdL));
+            // GEM1 gain fluctuates per primary (exponential), GEM2 as a fixed factor, as in NelGEM1/NelGEM2
+            nel.push_back(round(gRandom->Exp(GEM1_gain) * gain12));
+        }
+    }
+    N_primaries_reaching_GEMs = n_prim_tot;
+    std::cout << "Number of primaries reaching GEMs: " << N_primaries_reaching_GEMs
+              << " (per-primary diffusion)" << std::endl;
+
+    // the electrons of each avalanche spread by sigma_0 around their primary:
+    // reuse the parallel smearing with the primaries as 'hits'
+    vector<double> sT(px.size(), s0T), sL(px.size(), s0L);
+    smear_parallel(px, py, pz, sT, sT, sL, nel, S3D_x, S3D_y, S3D_z);
     return true;
 }
 
