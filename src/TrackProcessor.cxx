@@ -29,6 +29,58 @@
 
 using namespace std;
 
+// -----------------------------------------------------------------------------
+// Light-level blur ("sigma0_light"): a Gaussian spread of the LIGHT emitted by
+// GEM3, applied after the GEM3 saturation and before vignetting and photon
+// statistics (lens PSF / defocus / light leaking between GEM holes).
+// Unlike diff_const_sigma0T it does not dilute the charge density at GEM3, so
+// it does not change the saturation. Separable, pixel-integrated Gaussian,
+// normalised: light is moved, not created (except what leaves the image).
+// Acts on image[x][y] in [x0,x1) x [y0,y1), enlarged by 4 sigma and clipped.
+// -----------------------------------------------------------------------------
+static void blur_light(vector<vector<double>>& image, double sigma_pix,
+                       int x0, int x1, int y0, int y1) {
+    if (sigma_pix <= 0.0 || image.empty()) return;
+    const int R = max(1, (int)ceil(4.0 * sigma_pix));
+    const int nx = (int)image.size(), ny = (int)image[0].size();
+    x0 = max(0, x0 - R); x1 = min(nx, x1 + R);
+    y0 = max(0, y0 - R); y1 = min(ny, y1 + R);
+    const int W = x1 - x0, H = y1 - y0;
+    if (W <= 0 || H <= 0) return;
+
+    // 1D kernel: Gaussian integrated over each pixel
+    vector<double> k(2 * R + 1);
+    const double s = sigma_pix * sqrt(2.0);
+    double sum = 0.0;
+    for (int i = -R; i <= R; i++) {
+        k[i + R] = 0.5 * (erf((i + 0.5) / s) - erf((i - 0.5) / s));
+        sum += k[i + R];
+    }
+    for (double& v : k) v /= sum;
+
+    // along x
+    vector<double> tmp((size_t)W * H, 0.0);
+    for (int x = 0; x < W; x++)
+        for (int y = 0; y < H; y++) {
+            const double v = image[x0 + x][y0 + y];
+            if (v == 0.0) continue;
+            const int lo = max(-R, -x), hi = min(R, W - 1 - x);
+            for (int i = lo; i <= hi; i++) tmp[(size_t)(x + i) * H + y] += v * k[i + R];
+        }
+    // along y, back into the image
+    for (int x = 0; x < W; x++) {
+        vector<double> col(H, 0.0);
+        for (int y = 0; y < H; y++) {
+            const double v = tmp[(size_t)x * H + y];
+            if (v == 0.0) continue;
+            const int lo = max(-R, -y), hi = min(R, H - 1 - y);
+            for (int j = lo; j <= hi; j++) col[y + j] += v * k[j + R];
+        }
+        for (int y = 0; y < H; y++) image[x0 + x][y0 + y] = col[y];
+    }
+}
+
+
 TrackProcessor::TrackProcessor(ConfigManager& configMgr)
     : config(configMgr) {
         N_primaries_reaching_GEMs = -1;
@@ -546,13 +598,40 @@ bool TrackProcessor::computeWithSaturation(const vector<double>& x_hits_tr,
         int y_end   = min(y_pix*xy_vox_scale, y_origin + (int)hout[0].size());
         // cout<<"PADDING ["<<x_start<<":"<<x_end<<","<<y_start<<":"<<y_end<<"]"<<endl;
 
-        // Adding voxels to the same pixel before applying camera response
-        for(int xx=x_start; xx<x_end; xx++){
-            for(int yy=y_start; yy<y_end; yy++){
-                image[xx/xy_vox_scale][yy/xy_vox_scale]+=hout[xx-x_origin][yy-y_origin];
+        // ---- light of THIS track on the camera pixels ----
+        // sigma0 split: the charge spread at the GEMs is diff_const_sigma0T, while
+        // 'sigma0_light' [mm] is an extra Gaussian spread of the LIGHT emitted by
+        // GEM3, applied after the saturation and before vignetting and photon
+        // statistics, so it does not dilute the charge density at GEM3.
+        // The track's light is collected in its own buffer and blurred there, so
+        // light of earlier tracks in the same picture is not blurred again.
+        // Key absent or 0 -> no blur (original behaviour).
+        {
+            const double s1 = config.get("sigma0_light").empty() ? 0.0 : config.getDouble("sigma0_light");
+            const double pix_mm = config.getDouble("x_dim") / x_pix;   // camera pixel on the GEM plane
+
+            const int nx = (int)image.size(), ny = (int)image[0].size();
+            const int px0 = x_start / xy_vox_scale, px1 = (x_end - 1) / xy_vox_scale + 1;
+            const int py0 = y_start / xy_vox_scale, py1 = (y_end - 1) / xy_vox_scale + 1;
+            const int R = (int)ceil(4.0 * s1 / pix_mm) + 1;
+            const int X0 = max(0, px0 - R), X1 = min(nx, px1 + R);
+            const int Y0 = max(0, py0 - R), Y1 = min(ny, py1 + R);
+            const int W = X1 - X0, H = Y1 - Y0;
+            if (W > 0 && H > 0) {
+                vector<vector<double>> loc(W, vector<double>(H, 0.0));
+                // adding voxels to the same pixel before applying the camera response
+                for (int xx = x_start; xx < x_end; xx++)
+                    for (int yy = y_start; yy < y_end; yy++)
+                        loc[xx / xy_vox_scale - X0][yy / xy_vox_scale - Y0] += hout[xx - x_origin][yy - y_origin];
+
+                if (s1 > 0.0) blur_light(loc, s1 / pix_mm, 0, W, 0, H);
+
+                for (int x = 0; x < W; x++)
+                    for (int y = 0; y < H; y++)
+                        image[X0 + x][Y0 + y] += loc[x][y];
             }
         }
-        
+
         // Applying Poisson smearing + camera response
         for(unsigned int ii = 0; ii<image.size(); ii++) {
             for(unsigned int jj = 0; jj<image[0].size(); jj++) {
@@ -605,6 +684,11 @@ bool TrackProcessor::cloud_smearing3D(const vector<double>& x_hits_tr,
                                       vector<float>& S3D_y,
                                       vector<float>& S3D_z) {
 
+    // per-primary diffusion (optional; key absent -> false -> original behaviour)
+    if (config.getBool("primary_granularity"))
+        return cloud_smearing3D_primaries(x_hits_tr, y_hits_tr, z_hits_tr, energy_hits,
+                                          S3D_x, S3D_y, S3D_z);
+
     vector<double> nel = NelGEM2(energy_hits, z_hits_tr);
     if (nel.empty()) {
         std::cerr << "Warning: TrackProcessor::cloud_smearing3D: skipping this track because of empty result from TrackProcessor::NelGEM2."<<std::endl;
@@ -632,6 +716,60 @@ bool TrackProcessor::cloud_smearing3D(const vector<double>& x_hits_tr,
     //    cout<<S3D_x[i]<<endl;
     //}
 
+    return true;
+}
+
+
+bool TrackProcessor::cloud_smearing3D_primaries(const vector<double>& x_hits_tr,
+                                                const vector<double>& y_hits_tr,
+                                                const vector<double>& z_hits_tr,
+                                                const vector<double>& energy_hits,
+                                                vector<float>& S3D_x,
+                                                vector<float>& S3D_y,
+                                                vector<float>& S3D_z) {
+
+    for (double z : z_hits_tr) {
+        if (z < 0) {
+            std::cerr << "Warning: TrackProcessor::cloud_smearing3D_primaries: track contains hits with negative drift length." << std::endl;
+            return false;
+        }
+    }
+
+    const double ion_pot = config.getDouble("ion_pot");
+    const double lambda  = config.getDouble("absorption_l");
+    const double s0T = sqrt(config.getDouble("diff_const_sigma0T"));   // transfer gaps etc. [mm]
+    const double s0L = sqrt(config.getDouble("diff_const_sigma0L"));
+    const double DT2 = config.getDouble("diff_coeff_T");               // [mm^2/cm]
+    const double DL2 = config.getDouble("diff_coeff_L");
+    const double gain12 = extraction_eff_GEM1 * GEM2_gain * extraction_eff_GEM2;
+
+    // one entry per primary: its position after the drift and its avalanche size
+    vector<double> px, py, pz, nel;
+    long int n_prim_tot = 0;
+    for (size_t i = 0; i < x_hits_tr.size(); i++) {
+        const double z = z_hits_tr[i];
+        // primaries of this hit reaching the GEMs (attachment), as in NelGEM2
+        const int np = gRandom->Poisson(energy_hits[i] / ion_pot * exp(-z / lambda));
+        n_prim_tot += np;
+        // drift diffusion only (sigma_0 is applied below, per avalanche electron)
+        const double sdT = sqrt(DT2 * z / 10.0);
+        const double sdL = sqrt(DL2 * z / 10.0);
+        for (int j = 0; j < np; j++) {
+            px.push_back(gRandom->Gaus(x_hits_tr[i], sdT));
+            py.push_back(gRandom->Gaus(y_hits_tr[i], sdT));
+            pz.push_back(gRandom->Gaus(z_hits_tr[i], sdL));
+            // GEM1 gain fluctuates per primary (exponential), GEM2 as a fixed factor, as in NelGEM1/NelGEM2
+            nel.push_back(round(gRandom->Exp(GEM1_gain) * gain12));
+        }
+    }
+    N_primaries_reaching_GEMs = n_prim_tot;
+    std::cout << "Number of primaries reaching GEMs: " << N_primaries_reaching_GEMs
+              << " (per-primary diffusion)" << std::endl;
+
+    // the electrons of each avalanche spread by sigma_0 around their primary:
+    // reuse the parallel smearing with the primaries as 'hits'
+    vector<double> sT(px.size(), s0T), sL(px.size(), s0L);
+    smear_parallel(px, py, pz, sT, sT, sL, nel, S3D_x, S3D_y, S3D_z);
     return true;
 }
 

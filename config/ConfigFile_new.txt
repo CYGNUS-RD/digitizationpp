@@ -8,6 +8,8 @@
 'diff_const_sigma0L'    : 0.0676,     # diffusion constant [mm]^2
 'diff_coeff_L'          : 0.0103483,    # diffusion parameter [mm/sqrt(cm)]^2 for 0.8 kV/cm
 #'diff_coeff_L'          : 0.0152483,   # diffusion parameter [mm/sqrt(cm)]^2 for 0.5 kV/cm (RUN 5)
+'primary_granularity'   : True,      # if 'True' drift diffusion is applied per primary electron and sigma_0 per avalanche electron
+'sigma0_light'          : 0.,        # extra Gaussian spread [mm] of the GEM3 light (after saturation); 0 = off
 'ion_pot'               : 0.0350,    # ionization potential for He/CF4 60/40 [keV]
 'photons_per_el'        : 0.07,      # number of photons per electron produced in the avalanche
 'absorption_l'          : 1350.,     # absorption length in [mm]
