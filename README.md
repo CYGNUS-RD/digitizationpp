@@ -134,6 +134,11 @@ supported, and absent bounds/range disable that axis. Track shape and direction
 are preserved. Sampled shifts are saved in `event_info` as `placement_dx_mm`,
 `placement_dy_mm` and `placement_dz_mm`.
 
+
+## Detailed description of logic and physics of the code
+
+A detailed description of the logical and physical flow of the code can be founf [here](flow.md)
+
 # Example
 From `<path_to_digitizationpp-dir>`
 
