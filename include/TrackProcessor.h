@@ -125,6 +125,7 @@ private:
      * @param[in] y_hits_tr Vector of y coordinates of energy deposits.
      * @param[in] z_hits_tr Vector of z coordinates of energy deposits.
      * @param[in] energy_hits_tr Energy deposited at each hit.
+     * @param[in] batch_index Index of the batch for correct seed in fixedseed configuration
      * @param[in] S3D_x Vector of x coordinates of smeared electrons.
      * @param[in] S3D_y Vector of y coordinates of smeared electrons.
      * @param[in] S3D_z Vector of z coordinates of smeared electrons.
@@ -135,9 +136,39 @@ private:
                             const std::vector<double>& y_hits_tr,
                             const std::vector<double>& z_hits_tr,
                             const std::vector<double>& energy_hits_tr,
+                            const size_t batch_index,
                             std::vector<float>& S3D_x,
                             std::vector<float>& S3D_y,
                             std::vector<float>& S3D_z);
+
+    /**
+     * @brief Smears previously sampled post-GEM2 electrons in three dimensions.
+     *
+     * @details Uses the supplied diffusion widths for each source point. A source
+     * point represents an original hit or a primary after drift diffusion,
+     * depending on the selected mode. Clears the output vectors before filling them.
+     *
+     * @param[in] x Source x coordinates in mm.
+     * @param[in] y Source y coordinates in mm.
+     * @param[in] z Source z coordinates in mm.
+     * @param[in] sigma_T transferse drift Gaussian smearing in mm.
+     * @param[in] sigma_L longitudinal drift Gaussian smearing in mm.
+     * @param[in] nel Number of post-GEM2 electrons for each source point.
+     * @param[in] batch_index Index of the batch for correct seed in fixedseed configuration
+     * @param[out] S3D_x Smeared electron x coordinates in mm.
+     * @param[out] S3D_y Smeared electron y coordinates in mm.
+     * @param[out] S3D_z Smeared electron z coordinates in mm.
+     */
+    void cloud_smearing3D_from_nel(const std::vector<double>& x_hits_tr,
+                                   const std::vector<double>& y_hits_tr,
+                                   const std::vector<double>& z_hits_tr,
+                                   const std::vector<double>& sigma_T,
+                                   const std::vector<double>& sigma_L,
+                                   const std::vector<double>& nel,
+                                   const size_t batch_index,
+                                   std::vector<float>& S3D_x,
+                                   std::vector<float>& S3D_y,
+                                   std::vector<float>& S3D_z);
 
      /**
      * @brief Applies Gaussian smearing to a single axis using local sigma and charge.
@@ -159,6 +190,7 @@ private:
      * @param[in] y_axis_sigma Vector of total diffusion sigma along the y axis to apply to each energy deposits (it depends on z!)
      * @param[in] z_axis_sigma Vector of total diffusion sigma along the z axis to apply to each energy deposits (it depends on z!)
      * @param[in] nel Number of electrons deposited at each hit.
+     * @param[in] batch_index Index of the batch for correct seed in fixedseed configuration
      * @param[in] X Vector of x coordinates of smeared electrons.
      * @param[in] Y Vector of y coordinates of smeared electrons.
      * @param[in] Z Vector of z coordinates of smeared electrons.
@@ -170,6 +202,7 @@ private:
                         const std::vector<double>& y_axis_sigma,
                         const std::vector<double>& z_axis_sigma,
                         const std::vector<double>& nel,
+                        const size_t batch_index,
                         std::vector<float>& X,
                         std::vector<float>& Y,
                         std::vector<float>& Z);
@@ -216,6 +249,57 @@ private:
      * @return Saturated output value.
      */
     double Nph_saturation(int nel, double A, double beta);
+
+    /**
+     * @brief Applies Gaussian blurring to the light emitted by GEM3.
+     *
+     * @details The blur is applied after GEM3 saturation and before the camera
+     * response. The specified region is expanded by the kernel radius and clipped
+     * to the image boundaries.
+     *
+     * @param[in,out] image Track light image indexed as image[x][y].
+     * @param[in] sigma_pix Standard deviation of the Gaussian kernel in pixels.
+     *     A non-positive value disables the blur.
+     * @param[in] x0 First x pixel of the region (inclusive).
+     * @param[in] x1 Last x boundary of the region (exclusive).
+     * @param[in] y0 First y pixel of the region (inclusive).
+     * @param[in] y1 Last y boundary of the region (exclusive).
+     */
+    static void blur_light(std::vector<std::vector<double>>& image,
+                       double sigma_pix,
+                       int x0, int x1, int y0, int y1);
+
+
+    /**
+     * @brief Sample surviving primary electrons, their drift-diffused positions,
+     *        and their post-GEM2 avalanche sizes.
+     *
+     * @details Clears the output vectors on entry and fills them with one entry
+     *          per surviving primary. Entries at the same index describe the
+     *          same primary. The method updates N_primaries_reaching_GEMs on
+     *          success. A successful call may produce zero primaries, leaving
+     *          all output vectors empty.
+     *
+     * @param[in] x_hits_tr Original hit x coordinates [mm].
+     * @param[in] y_hits_tr Original hit y coordinates [mm].
+     * @param[in] z_hits_tr Original hit z coordinates used as drift distances [mm].
+     * @param[in] energy_hits Energy deposited per hit [keV].
+     * @param[out] px Primary x coordinates after drift diffusion [mm].
+     * @param[out] py Primary y coordinates after drift diffusion [mm].
+     * @param[out] pz Primary z coordinates after drift diffusion [mm].
+     * @param[out] nel Rounded number of electrons after GEM2 for each primary.
+     * @pre All four input vectors have the same length.
+     * @return true on success, including when zero primaries are sampled.
+     * @return false if any original hit has a negative drift distance.
+     */
+    bool prepare_primaries(const std::vector<double>& x_hits_tr,
+                       const std::vector<double>& y_hits_tr,
+                       const std::vector<double>& z_hits_tr,
+                       const std::vector<double>& energy_hits,
+                       std::vector<double>& px,
+                       std::vector<double>& py,
+                       std::vector<double>& pz,
+                       std::vector<double>& nel);
 
     /**
     * @brief Maps string variable names to integer codes for track variable dispatch.
